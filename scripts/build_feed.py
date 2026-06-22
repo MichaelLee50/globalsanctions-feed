@@ -1,39 +1,44 @@
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
-from xml.etree.ElementTree import Element, SubElement, tostring
+from xml.etree.ElementTree import Element, SubElement, ElementTree
 
 URL = "https://globalsanctions.com/news/"
 BASE = "https://globalsanctions.com"
 
-r = requests.get(URL)
-soup = BeautifulSoup(r.text, "html.parser")
-
-items = soup.select("a[href]")
+response = requests.get(URL)
+soup = BeautifulSoup(response.text, "html.parser")
 
 rss = Element("rss", version="2.0")
 channel = SubElement(rss, "channel")
 
-SubElement(channel, "title").text = "Global Sanctions News (Custom Feed)"
+SubElement(channel, "title").text = "Global Sanctions News (Custom RSS)"
 SubElement(channel, "link").text = URL
 SubElement(channel, "description").text = "Auto-generated feed"
 
 count = 0
+seen = set()
 
-for i in items:
-    link = i.get("href")
-    title = i.text.strip()
+for a in soup.find_all("a"):
+    title = a.get_text(strip=True)
+    href = a.get("href")
 
-    if not link or not title:
+    if not title or not href:
         continue
 
-    if "/news/" not in link:
+    # Only keep links with meaningful article titles
+    if len(title) < 30:
         continue
 
-    if len(title) < 10:
+    # Ignore navigation junk
+    if "Read more" in title:
         continue
 
-    full_link = link if link.startswith("http") else BASE + link
+    full_link = href if href.startswith("http") else BASE + href
+
+    if full_link in seen:
+        continue
+    seen.add(full_link)
 
     item = SubElement(channel, "item")
     SubElement(item, "title").text = title
@@ -43,8 +48,10 @@ for i in items:
     )
 
     count += 1
-    if count >= 20:
+    if count >= 15:
         break
 
-with open("feed.xml", "wb") as f:
-    f.write(tostring(rss))
+tree = ElementTree(rss)
+tree.write("feed.xml", encoding="utf-8", xml_declaration=True)
+
+print(f"Feed generated with {count} items")
