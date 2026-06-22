@@ -1,99 +1,41 @@
+import re
 import requests
-from bs4 import BeautifulSoup
-from datetime import datetime
 from xml.etree.ElementTree import Element, SubElement, ElementTree
-from urllib.parse import urljoin
 
 URL = "https://globalsanctions.com/news/"
-BASE = "https://globalsanctions.com"
 
 response = requests.get(URL, timeout=30)
 response.raise_for_status()
 
-soup = BeautifulSoup(response.text, "html.parser")
+html = response.text
 
-rss = Element("rss", version="2.0")
-channel = SubElement(rss, "channel")
+# Flatten the page text enough to make regex parsing reliable
+text = re.sub(r"\s+", " ", html)
 
-SubElement(channel, "title").text = "Global Sanctions News (Custom RSS)"
-SubElement(channel, "link").text = URL
-SubElement(channel, "description").text = "Auto-generated feed"
+# Try to isolate the visible news block on the page
+start_match = re.search(r"News\s+Home\s*>\s*News\s+\d+\s+to\s+\d+\s+of\s+\d+\s+results\s+", text)
+end_match = re.search(r"Global Sanctions provides daily updates on sanctions news", text)
 
-seen = set()
-count = 0
+if start_match:
+    start = start_match.end()
+else:
+    start = 0
 
-# Strategy:
-# The page pattern appears to be headline + date + summary + "Read more".
-# So only use links whose text is exactly "Read more", then pull the nearest heading nearby.
+if end_match:
+    end = end_match.start()
+else:
+    end = len(text)
 
-read_more_links = []
-for a in soup.find_all("a", href=True):
-    text = a.get_text(" ", strip=True)
-    if text.lower() == "read more":
-        read_more_links.append(a)
+news_block = text[start:end]
 
-def find_title_for_link(a_tag):
-    # Look up a few parent levels and search for headings in the same block
-    node = a_tag
-    for _ in range(6):
-        if node is None:
-            break
+# Pattern seen in the visible page content:
+# HEADLINE DATE SUMMARY Read more
+pattern = re.compile(
+    r"(?P<title>.+?)\s+"
+    r"(?P<date>\d{1,2}\s+[A-Z][a-z]+\s+\d{4})\s+"
+    r"(?P<summary>.+?)\s+Read more",
+    re.DOTALL
+)
 
-        # Prefer headings in this block
-        for tag_name in ["h1", "h2", "h3", "h4"]:
-            heading = node.find(tag_name)
-            if heading:
-                title = heading.get_text(" ", strip=True)
-                if title and len(title) > 8:
-                    return title
+matches = pattern.finditer(news_block)
 
-        node = node.parent
-
-    return None
-
-for a in read_more_links:
-    href = a.get("href", "").strip()
-    if not href:
-        continue
-
-    full_link = urljoin(BASE, href)
-
-    # Ignore obvious non-news paths
-    bad_bits = [
-        "/region/",
-        "/sanctioning-states/",
-        "/guidance/",
-        "/licensing/",
-        "/enforcement/",
-        "/judgments/",
-        "/register",
-        "/login",
-        "/subscribe",
-    ]
-    if any(bit in full_link for bit in bad_bits):
-        continue
-
-    title = find_title_for_link(a)
-    if not title:
-        continue
-
-    if title in seen:
-        continue
-    seen.add(title)
-
-    item = SubElement(channel, "item")
-    SubElement(item, "title").text = title
-    SubElement(item, "link").text = full_link
-    SubElement(item, "pubDate").text = datetime.utcnow().strftime(
-        "%a, %d %b %Y %H:%M:%S GMT"
-    )
-
-    count += 1
-    if count >= 20:
-        break
-
-# If nothing was found, write an empty but valid feed
-tree = ElementTree(rss)
-tree.write("feed.xml", encoding="utf-8", xml_declaration=True)
-
-print(f"Feed generated with {count} items")
