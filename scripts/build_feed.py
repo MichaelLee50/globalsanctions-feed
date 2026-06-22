@@ -1,32 +1,10 @@
 import re
-import requests
-from bs4 import BeautifulSoup
 from xml.etree.ElementTree import Element, SubElement, ElementTree
+from playwright.sync_api import sync_playwright
 
 URL = "https://globalsanctions.com/news/"
 
-response = requests.get(URL, timeout=30)
-response.raise_for_status()
-
-soup = BeautifulSoup(response.text, "html.parser")
-
-# Flatten visible text in page order
-lines = []
-for s in soup.stripped_strings:
-    text = " ".join(str(s).split()).strip()
-    if text:
-        lines.append(text)
-
-rss = Element("rss", version="2.0")
-channel = SubElement(rss, "channel")
-
-SubElement(channel, "title").text = "Global Sanctions News (Custom RSS)"
-SubElement(channel, "link").text = URL
-SubElement(channel, "description").text = "Auto-generated feed from visible Global Sanctions news list"
-
-date_re = re.compile(r"^\d{1,2}\s+[A-Z][a-z]+\s+\d{4}$")
-
-bad_titles = {
+BAD_TITLES = {
     "News",
     "Home > News",
     "Sanctions regimes",
@@ -50,60 +28,81 @@ bad_titles = {
     "Read more",
 }
 
-seen = set()
-count = 0
+date_re = re.compile(r"^\d{1,2}\s+[A-Z][a-z]+\s+\d{4}$")
 
-# Find lines that are dates, then take the previous line as headline
-for i, line in enumerate(lines):
-    if not date_re.match(line):
-        continue
+def build_feed():
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.goto(URL, wait_until="networkidle", timeout=60000)
+        text = page.locator("body").inner_text()
+        browser.close()
 
-    if i == 0:
-        continue
+    # Split the rendered page into clean visible lines
+    lines = []
+    for raw in text.splitlines():
+        clean = " ".join(raw.split()).strip()
+        if clean:
+            lines.append(clean)
 
-    title = lines[i - 1].strip()
+    rss = Element("rss", version="2.0")
+    channel = SubElement(rss, "channel")
 
-    if title in bad_titles:
-        continue
+    SubElement(channel, "title").text = "Global Sanctions News (Custom RSS)"
+    SubElement(channel, "link").text = URL
+    SubElement(channel, "description").text = "Auto-generated feed from rendered Global Sanctions news list"
 
-    # Ignore obvious non-headlines
-    if len(title) < 15:
-        continue
-    if title.lower().startswith("news home"):
-        continue
-    if "target search" in title.lower():
-        continue
-    if title.lower() in seen:
-        continue
+    seen = set()
+    count = 0
 
-    # Optional summary: next non-date, non-junk line after the date
-    summary = ""
-    for j in range(i + 1, min(i + 4, len(lines))):
-        candidate = lines[j].strip()
-        if not candidate:
+    for i, line in enumerate(lines):
+        if not date_re.match(line):
             continue
-        if date_re.match(candidate):
+
+        if i == 0:
+            continue
+
+        title = lines[i - 1].strip()
+
+        if title in BAD_TITLES:
+            continue
+        if len(title) < 12:
+            continue
+        if title.lower() in seen:
+            continue
+
+        # Grab a short summary from the next sensible line
+        summary = ""
+        for j in range(i + 1, min(i + 5, len(lines))):
+            candidate = lines[j].strip()
+            if not candidate:
+                continue
+            if date_re.match(candidate):
+                break
+            if candidate in BAD_TITLES:
+                continue
+            if candidate.lower() == "read more":
+                continue
+            if len(candidate) > 20:
+                summary = candidate
+                break
+
+        item = SubElement(channel, "item")
+        SubElement(item, "title").text = title
+        SubElement(item, "link").text = URL
+        if summary:
+            SubElement(item, "description").text = summary
+        SubElement(item, "pubDate").text = line
+
+        seen.add(title.lower())
+        count += 1
+        if count >= 20:
             break
-        if candidate in bad_titles:
-            continue
-        if candidate.lower() == "read more":
-            continue
-        if len(candidate) > 25:
-            summary = candidate
-            break
 
-    item = SubElement(channel, "item")
-    SubElement(item, "title").text = title
-    SubElement(item, "link").text = URL
-    if summary:
-        SubElement(item, "description").text = summary
-    SubElement(item, "pubDate").text = line
+    tree = ElementTree(rss)
+    tree.write("feed.xml", encoding="utf-8", xml_declaration=True)
 
-    seen.add(title.lower())
-    count += 1
+    print(f"Feed generated with {count} items")
 
-# Write feed.xml
-tree = ElementTree(rss)
-tree.write("feed.xml", encoding="utf-8", xml_declaration=True)
-
-print(f"Feed generated with {count} items")
+if __name__ == "__main__":
+    build_feed()
