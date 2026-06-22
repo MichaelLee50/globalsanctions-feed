@@ -1,8 +1,1 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0">
-  <channel>
-    <title>Global Sanctions News (Custom RSS)</title>
-    <link>https://globalsanctions.com/news/</link>
-    <description>Initial placeholder feed</description>
-  </channel>
-</rss>
+<rss version="2.0"><channel><title>Global Sanctions News (Custom Feed)</title><link>https://globalsanctions.com/news/</link><description>Auto-generated feed</description></channel></rss>
