@@ -1,5 +1,6 @@
 import re
 import requests
+from bs4 import BeautifulSoup
 from xml.etree.ElementTree import Element, SubElement, ElementTree
 
 URL = "https://globalsanctions.com/news/"
@@ -7,37 +8,15 @@ URL = "https://globalsanctions.com/news/"
 response = requests.get(URL, timeout=30)
 response.raise_for_status()
 
-html = response.text
+soup = BeautifulSoup(response.text, "html.parser")
 
-# Flatten the page text enough to make regex parsing reliable
-text = re.sub(r"\s+", " ", html)
-
-# Try to isolate the visible news block on the page
-start_match = re.search(r"News\s+Home\s*>\s*News\s+\d+\s+to\s+\d+\s+of\s+\d+\s+results\s+", text)
-end_match = re.search(r"Global Sanctions provides daily updates on sanctions news", text)
-
-if start_match:
-    start = start_match.end()
-else:
-    start = 0
-
-if end_match:
-    end = end_match.start()
-else:
-    end = len(text)
-
-news_block = text[start:end]
-
-# Pattern seen in the visible page content:
-# HEADLINE DATE SUMMARY Read more
-pattern = re.compile(
-    r"(?P<title>.+?)\s+"
-    r"(?P<date>\d{1,2}\s+[A-Z][a-z]+\s+\d{4})\s+"
-    r"(?P<summary>.+?)\s+Read more",
-    re.DOTALL
-)
-
-matches = pattern.finditer(news_block)
+# Turn the page into ordered visible text lines
+raw_lines = soup.get_text("\n").splitlines()
+lines = []
+for line in raw_lines:
+    clean = " ".join(line.split()).strip()
+    if clean:
+        lines.append(clean)
 
 rss = Element("rss", version="2.0")
 channel = SubElement(rss, "channel")
@@ -46,40 +25,68 @@ SubElement(channel, "title").text = "Global Sanctions News (Custom RSS)"
 SubElement(channel, "link").text = URL
 SubElement(channel, "description").text = "Auto-generated feed from visible Global Sanctions news list"
 
-count = 0
-seen_titles = set()
+date_re = re.compile(r"^\d{1,2}\s+[A-Z][a-z]+\s+\d{4}$")
 
-for m in matches:
-    title = m.group("title").strip()
-    date = m.group("date").strip()
-    summary = m.group("summary").strip()
+bad_titles = {
+    "News",
+    "Sanctions regimes",
+    "Geographic regimes",
+    "Thematic regimes",
+    "Expired regimes",
+    "Sanctioning states",
+    "Arbitration",
+    "Subscription",
+    "Register for free email alerts",
+    "Subscribe for full access",
+    "Login",
+    "About",
+    "FAQ",
+    "Contact",
+}
 
-    # Filter obvious junk
+items_found = 0
+seen = set()
+
+for i, line in enumerate(lines):
+    if not date_re.match(line):
+        continue
+
+    # The visible page pattern should be:
+    # previous line = headline
+    # current line = date
+    # next line = summary
+    if i == 0:
+        continue
+
+    title = lines[i - 1].strip()
+
+    if title in bad_titles:
+        continue
+
     if len(title) < 12:
         continue
-    if title.lower() in seen_titles:
+
+    if title.lower() in seen:
         continue
 
-    # Remove any leading clutter that might bleed into the title
-    for junk in [
-        "News ",
-        "Home > ",
-        "Results ",
-    ]:
-        if title.startswith(junk):
-            title = title.replace(junk, "", 1).strip()
+    summary = ""
+    if i + 1 < len(lines):
+        next_line = lines[i + 1].strip()
+        if next_line and not date_re.match(next_line) and len(next_line) > 20:
+            summary = next_line
 
     item = SubElement(channel, "item")
     SubElement(item, "title").text = title
     SubElement(item, "link").text = URL
-    SubElement(item, "description").text = summary
-    SubElement(item, "pubDate").text = date
+    if summary:
+        SubElement(item, "description").text = summary
+    SubElement(item, "pubDate").text = line
 
-    seen_titles.add(title.lower())
-    count += 1
+    seen.add(title.lower())
+    items_found += 1
 
-# Write a valid feed even if zero items are found
+# Write the feed
 tree = ElementTree(rss)
 tree.write("feed.xml", encoding="utf-8", xml_declaration=True)
 
-print(f"Feed generated with {count} items")
+print(f"Feed generated with {items_found} items")
