@@ -17,36 +17,30 @@ SubElement(channel, "link").text = URL
 SubElement(channel, "description").text = "Auto-generated feed"
 
 count = 0
-seen = set()
 
-for article in soup.find_all("a"):
-    title = article.get_text(strip=True)
-    link = article.get("href")
+# ✅ TARGET: headings in the news list
+for item in soup.find_all("h3"):
+    title = item.get_text(strip=True)
 
-    if not title or not link:
+    if not title or len(title) < 10:
         continue
 
-    # ✅ Only include article links (these contain readable sentences)
-    if len(title) < 40:
-        continue
+    # Look for link inside or nearby
+    link_tag = item.find_parent("a") or item.find("a")
 
-    # ✅ Exclude navigation / categories
-    bad_words = ["sanctions regimes", "guidance", "licensing", "enforcement",
-                 "judgments", "register", "login", "subscribe"]
+    if link_tag and link_tag.get("href"):
+        href = link_tag.get("href")
+    else:
+        # fallback: use page
+        href = URL
 
-    if any(word in title.lower() for word in bad_words):
-        continue
+    if not href.startswith("http"):
+        href = BASE + href
 
-    full_link = link if link.startswith("http") else BASE + link
-
-    if full_link in seen:
-        continue
-    seen.add(full_link)
-
-    item = SubElement(channel, "item")
-    SubElement(item, "title").text = title
-    SubElement(item, "link").text = full_link
-    SubElement(item, "pubDate").text = datetime.utcnow().strftime(
+    entry = SubElement(channel, "item")
+    SubElement(entry, "title").text = title
+    SubElement(entry, "link").text = href
+    SubElement(entry, "pubDate").text = datetime.utcnow().strftime(
         "%a, %d %b %Y %H:%M:%S GMT"
     )
 
