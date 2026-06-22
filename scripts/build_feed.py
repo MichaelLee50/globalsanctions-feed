@@ -4,7 +4,7 @@ from playwright.sync_api import sync_playwright
 
 URL = "https://globalsanctions.com/news/"
 
-BAD_TITLES = {
+BAD_LINES = {
     "News",
     "Home > News",
     "Sanctions regimes",
@@ -35,12 +35,14 @@ def build_feed():
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         page.goto(URL, wait_until="networkidle", timeout=60000)
-        text = page.locator("body").inner_text()
+
+        # Grab the visible rendered text exactly as displayed in the browser
+        body_text = page.locator("body").inner_text()
         browser.close()
 
-    # Split the rendered page into clean visible lines
+    # Clean into visible ordered lines
     lines = []
-    for raw in text.splitlines():
+    for raw in body_text.splitlines():
         clean = " ".join(raw.split()).strip()
         if clean:
             lines.append(clean)
@@ -52,9 +54,14 @@ def build_feed():
     SubElement(channel, "link").text = URL
     SubElement(channel, "description").text = "Auto-generated feed from rendered Global Sanctions news list"
 
-    seen = set()
+    seen_titles = set()
     count = 0
 
+    # Expected visible page pattern:
+    # HEADLINE
+    # DATE
+    # SUMMARY
+    # Read more
     for i, line in enumerate(lines):
         if not date_re.match(line):
             continue
@@ -64,26 +71,24 @@ def build_feed():
 
         title = lines[i - 1].strip()
 
-        if title in BAD_TITLES:
+        if title in BAD_LINES:
             continue
-        if len(title) < 12:
+        if len(title) < 15:
             continue
-        if title.lower() in seen:
+        if title.lower() in seen_titles:
             continue
 
-        # Grab a short summary from the next sensible line
+        # Get a sensible summary from the next few lines
         summary = ""
         for j in range(i + 1, min(i + 5, len(lines))):
             candidate = lines[j].strip()
             if not candidate:
                 continue
+            if candidate in BAD_LINES:
+                continue
             if date_re.match(candidate):
                 break
-            if candidate in BAD_TITLES:
-                continue
-            if candidate.lower() == "read more":
-                continue
-            if len(candidate) > 20:
+            if len(candidate) > 25:
                 summary = candidate
                 break
 
@@ -94,8 +99,9 @@ def build_feed():
             SubElement(item, "description").text = summary
         SubElement(item, "pubDate").text = line
 
-        seen.add(title.lower())
+        seen_titles.add(title.lower())
         count += 1
+
         if count >= 20:
             break
 
