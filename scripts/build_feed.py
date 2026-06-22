@@ -10,13 +10,12 @@ response.raise_for_status()
 
 soup = BeautifulSoup(response.text, "html.parser")
 
-# Turn the page into ordered visible text lines
-raw_lines = soup.get_text("\n").splitlines()
+# Flatten visible text in page order
 lines = []
-for line in raw_lines:
-    clean = " ".join(line.split()).strip()
-    if clean:
-        lines.append(clean)
+for s in soup.stripped_strings:
+    text = " ".join(str(s).split()).strip()
+    if text:
+        lines.append(text)
 
 rss = Element("rss", version="2.0")
 channel = SubElement(rss, "channel")
@@ -29,11 +28,17 @@ date_re = re.compile(r"^\d{1,2}\s+[A-Z][a-z]+\s+\d{4}$")
 
 bad_titles = {
     "News",
+    "Home > News",
     "Sanctions regimes",
     "Geographic regimes",
     "Thematic regimes",
     "Expired regimes",
     "Sanctioning states",
+    "Target Search",
+    "Guidance",
+    "Licensing",
+    "Enforcement",
+    "Judgments & arbitration",
     "Arbitration",
     "Subscription",
     "Register for free email alerts",
@@ -42,19 +47,17 @@ bad_titles = {
     "About",
     "FAQ",
     "Contact",
+    "Read more",
 }
 
-items_found = 0
 seen = set()
+count = 0
 
+# Find lines that are dates, then take the previous line as headline
 for i, line in enumerate(lines):
     if not date_re.match(line):
         continue
 
-    # The visible page pattern should be:
-    # previous line = headline
-    # current line = date
-    # next line = summary
     if i == 0:
         continue
 
@@ -63,17 +66,31 @@ for i, line in enumerate(lines):
     if title in bad_titles:
         continue
 
-    if len(title) < 12:
+    # Ignore obvious non-headlines
+    if len(title) < 15:
         continue
-
+    if title.lower().startswith("news home"):
+        continue
+    if "target search" in title.lower():
+        continue
     if title.lower() in seen:
         continue
 
+    # Optional summary: next non-date, non-junk line after the date
     summary = ""
-    if i + 1 < len(lines):
-        next_line = lines[i + 1].strip()
-        if next_line and not date_re.match(next_line) and len(next_line) > 20:
-            summary = next_line
+    for j in range(i + 1, min(i + 4, len(lines))):
+        candidate = lines[j].strip()
+        if not candidate:
+            continue
+        if date_re.match(candidate):
+            break
+        if candidate in bad_titles:
+            continue
+        if candidate.lower() == "read more":
+            continue
+        if len(candidate) > 25:
+            summary = candidate
+            break
 
     item = SubElement(channel, "item")
     SubElement(item, "title").text = title
@@ -83,10 +100,10 @@ for i, line in enumerate(lines):
     SubElement(item, "pubDate").text = line
 
     seen.add(title.lower())
-    items_found += 1
+    count += 1
 
-# Write the feed
+# Write feed.xml
 tree = ElementTree(rss)
 tree.write("feed.xml", encoding="utf-8", xml_declaration=True)
 
-print(f"Feed generated with {items_found} items")
+print(f"Feed generated with {count} items")
