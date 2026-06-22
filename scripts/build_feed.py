@@ -4,7 +4,6 @@ from datetime import datetime
 from xml.etree.ElementTree import Element, SubElement, ElementTree
 
 URL = "https://globalsanctions.com/news/"
-BASE = "https://globalsanctions.com"
 
 response = requests.get(URL)
 soup = BeautifulSoup(response.text, "html.parser")
@@ -17,38 +16,30 @@ SubElement(channel, "link").text = URL
 SubElement(channel, "description").text = "Auto-generated feed"
 
 count = 0
-seen = set()
 
-for a in soup.find_all("a"):
-    title = a.get_text(strip=True)
-    href = a.get("href")
+# Look for article titles (these are plain text blocks)
+paragraphs = soup.find_all("p")
 
-    if not title or not href:
+for p in paragraphs:
+    text = p.get_text(strip=True)
+
+    # Filter likely article titles (long enough, contains meaningful wording)
+    if len(text) < 50:
         continue
 
-    # Only keep links with meaningful article titles
-    if len(title) < 30:
+    # Optional: look for sentences that look like article summaries
+    if "." not in text:
         continue
-
-    # Ignore navigation junk
-    if "Read more" in title:
-        continue
-
-    full_link = href if href.startswith("http") else BASE + href
-
-    if full_link in seen:
-        continue
-    seen.add(full_link)
 
     item = SubElement(channel, "item")
-    SubElement(item, "title").text = title
-    SubElement(item, "link").text = full_link
+    SubElement(item, "title").text = text[:120]  # shorten title
+    SubElement(item, "link").text = URL
     SubElement(item, "pubDate").text = datetime.utcnow().strftime(
         "%a, %d %b %Y %H:%M:%S GMT"
     )
 
     count += 1
-    if count >= 15:
+    if count >= 10:
         break
 
 tree = ElementTree(rss)
