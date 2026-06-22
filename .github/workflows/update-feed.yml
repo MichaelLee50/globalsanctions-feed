@@ -39,7 +39,7 @@ jobs:
           if [[ -n "$(git status --porcelain)" ]]; then
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add feed.xml state.json
+            git add feed.xml 
             git commit -m "Auto-update feed"
             git push
           else
