@@ -4,6 +4,7 @@ from datetime import datetime
 from xml.etree.ElementTree import Element, SubElement, ElementTree
 
 URL = "https://globalsanctions.com/news/"
+BASE = "https://globalsanctions.com"
 
 response = requests.get(URL)
 soup = BeautifulSoup(response.text, "html.parser")
@@ -16,24 +17,35 @@ SubElement(channel, "link").text = URL
 SubElement(channel, "description").text = "Auto-generated feed"
 
 count = 0
+seen = set()
 
-# Look for article titles (these are plain text blocks)
-paragraphs = soup.find_all("p")
+for article in soup.find_all("a"):
+    title = article.get_text(strip=True)
+    link = article.get("href")
 
-for p in paragraphs:
-    text = p.get_text(strip=True)
-
-    # Filter likely article titles (long enough, contains meaningful wording)
-    if len(text) < 50:
+    if not title or not link:
         continue
 
-    # Optional: look for sentences that look like article summaries
-    if "." not in text:
+    # ✅ Only include article links (these contain readable sentences)
+    if len(title) < 40:
         continue
+
+    # ✅ Exclude navigation / categories
+    bad_words = ["sanctions regimes", "guidance", "licensing", "enforcement",
+                 "judgments", "register", "login", "subscribe"]
+
+    if any(word in title.lower() for word in bad_words):
+        continue
+
+    full_link = link if link.startswith("http") else BASE + link
+
+    if full_link in seen:
+        continue
+    seen.add(full_link)
 
     item = SubElement(channel, "item")
-    SubElement(item, "title").text = text[:120]  # shorten title
-    SubElement(item, "link").text = URL
+    SubElement(item, "title").text = title
+    SubElement(item, "link").text = full_link
     SubElement(item, "pubDate").text = datetime.utcnow().strftime(
         "%a, %d %b %Y %H:%M:%S GMT"
     )
