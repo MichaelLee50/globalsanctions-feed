@@ -34,7 +34,7 @@ def build_feed():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
-        page.goto(URL, wait_until="networkidle", timeout=60000)
+        page.goto(URL, wait_until="domcontentloaded", timeout=120000)
 
         # Grab the visible rendered text exactly as displayed in the browser
         body_text = page.locator("body").inner_text()
